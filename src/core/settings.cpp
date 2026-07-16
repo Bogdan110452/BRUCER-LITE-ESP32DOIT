@@ -201,6 +201,17 @@ void setDimmerTimeMenu() {
 **********************************************************************/
 void setUIColor() {
 
+#if defined(HAS_OLED_SSD1306)
+    // RGB palettes are not meaningful on an SSD1306. Keep pixels off for
+    // the background and light only text/borders to reduce glare and wear.
+    bruceConfig.priColor = TFT_WHITE;
+    bruceConfig.secColor = TFT_WHITE;
+    bruceConfig.bgColor = TFT_BLACK;
+    bruceConfig.setColorInverted(0);
+    tft.invertDisplay(false);
+    displayInfo("OLED dark mode fixed", true);
+    return;
+#endif
     while (1) {
         options.clear();
         int idx = UI_COLOR_COUNT;
@@ -978,11 +989,15 @@ void runClockLoop(bool showMenuHint) {
 
     for (;;) {
         if (millis() - tmp > 1000) {
+            if (clock_set) {
 #if defined(HAS_RTC)
-            updateTimeStr(_rtc.getTimeStruct());
+                updateTimeStr(_rtc.getTimeStruct());
 #else
-            updateTimeStr(rtc.getTimeStruct());
+                updateTimeStr(rtc.getTimeStruct());
 #endif
+            } else {
+                snprintf(timeStr, sizeof(timeStr), "--:--:--");
+            }
             Serial.print("Current time: ");
             Serial.println(timeStr);
             tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
@@ -1006,7 +1021,9 @@ void runClockLoop(bool showMenuHint) {
             // "OK to show menu" hint management
             if (hintVisible && (millis() - hintStartTime < 5000)) {
                 tft.setTextSize(1);
-                tft.drawCentreString("OK to show menu", tftWidth / 2, tftHeight / 2 + 25, 1);
+                tft.drawCentreString(
+                    clock_set ? "OK to show menu" : "D25: set clock", tftWidth / 2, tftHeight / 2 + 25, 1
+                );
             } else if (hintVisible && (millis() - hintStartTime >= 5000)) {
                 // Clear hint after 5 seconds
                 tft.fillRect(

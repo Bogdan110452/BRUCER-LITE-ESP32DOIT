@@ -1,3 +1,41 @@
+# BRUCER LITE ESP32 DOIT
+
+Community compatibility build derived from the open-source BRUCE firmware for inexpensive classic
+ESP32/DOIT DevKit V1 starter kits commonly sold with a 0.96-inch OLED display.
+
+This profile targets an ESP32-D0WD-V3 with 4 MB flash and an SSD1306 128x64 I2C OLED. It keeps the
+BRUCE menu and core features available on hardware with fewer resources than ESP32-S3-based kits.
+
+Current BRUCER-LITE release: **0.9 (pre-release)**. It has been validated on the reference bench
+hardware, but has **not yet been field-tested** and should not be treated as a stable release.
+
+## Starter-kit wiring
+
+| Function | GPIO | Wiring |
+| --- | ---: | --- |
+| OLED SDA | 21 | OLED SDA |
+| OLED SCL | 22 | OLED SCL |
+| Down | 32 | Button between GPIO32 and GND |
+| Up in lists / contextual right | 33 | Button between GPIO33 and GND |
+| Confirm / back | 25 | Button between GPIO25 and GND; hold for 700 ms to go back |
+
+The buttons use `INPUT_PULLUP`, so they must close their GPIO to GND when pressed. Do not connect
+the button signal to 3.3 V.
+
+## Build
+
+```sh
+pio run -e esp32doit-devkit-v1-headless
+```
+
+Generated full-flash image: `BRUCER-LITE-ESP32DOIT.bin`.
+
+Detailed hardware notes are in [`boards/ESP32-Classic/STARTERPACK.md`](boards/ESP32-Classic/STARTERPACK.md).
+This derivative preserves the original BRUCE credits and is distributed under the repository's
+GNU Affero General Public License v3.0. Upstream project: https://github.com/BruceDevices/firmware
+
+---
+
 ![Bruce Main Menu](./media/pictures/bruce_banner.jpg)
 
 # :shark: Bruce

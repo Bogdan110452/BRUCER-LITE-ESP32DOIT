@@ -442,11 +442,185 @@ KeyboardAction handleKeyboardSelection(
     return KEYBOARD_CONTINUE;
 }
 
+#if defined(HAS_OLED_SSD1306)
+/**
+ * Compact keyboard for the 128x64 two-colour SSD1306 used by ESP32-Classic.
+ *
+ * The stock Bruce keyboard needs substantially more vertical space and its
+ * physical-button handler does not match this board's down/right/select
+ * controls.  This layout keeps the prompt and typed value in the yellow band,
+ * and puts the key grid plus five actions in the blue band.
+ */
+template <int KeyboardHeight, int KeyboardWidth>
+String oledKeyboard(
+    String current_text, int max_size, String textbox_title, char keys[KeyboardHeight][KeyboardWidth][2],
+    bool mask_input
+) {
+    constexpr int kHeaderBottom = 15;
+    constexpr int kGridTop = 17;
+    constexpr int kActionsTop = 56;
+    constexpr int kActionCount = 5;
+    const char *actionLabels[kActionCount] = {"OK", "Aa", "DEL", "SP", "BACK"};
+
+    bool caps = false;
+    bool redraw = true;
+    int x = 0;
+    int y = 0;
+
+    resetTftDisplay();
+    touchPoint.Clear();
+
+    auto selectFirstValidKey = [&]() {
+        if (y < 0) {
+            if (x >= kActionCount) x = 0;
+            return;
+        }
+        if (x >= KeyboardWidth) x = 0;
+        for (int tries = 0; tries < KeyboardWidth && keys[y][x][caps] == '\0'; ++tries) {
+            x = (x + 1) % KeyboardWidth;
+        }
+    };
+
+    while (true) {
+        if (redraw) {
+            const int rowHeight = (kActionsTop - kGridTop) / KeyboardHeight;
+            const int keyWidth = tftWidth / KeyboardWidth;
+            const int actionWidth = tftWidth / kActionCount;
+
+            // Draw the whole frame in the RAM buffer, then transfer it once.
+            // This prevents visible partial redraws and long apparent freezes.
+            tft.startWrite();
+            tft.fillScreen(bruceConfig.bgColor);
+            tft.setTextDatum(TL_DATUM);
+            tft.setTextSize(1);
+            tft.setTextWrap(false);
+
+            String counter = String(current_text.length()) + "/" + String(max_size);
+            const int counterWidth = tft.textWidth(counter);
+            const int titleChars = max(1, (tftWidth - counterWidth - 6) / 6);
+            String title = textbox_title;
+            if (title.length() > titleChars) title = title.substring(0, titleChars - 1) + "~";
+
+            tft.setTextColor(getComplementaryColor2(bruceConfig.bgColor), bruceConfig.bgColor);
+            tft.drawString(title, 0, 0);
+            tft.drawRightString(counter, tftWidth - 1, 0);
+
+            String shown = mask_input ? repeatString(current_text.length(), "*") : current_text;
+            const int visibleChars = tftWidth / 6;
+            if (shown.length() > visibleChars) shown = "<" + shown.substring(shown.length() - visibleChars + 1);
+            tft.drawString(shown, 0, 8);
+            tft.drawFastHLine(0, kHeaderBottom, tftWidth, getComplementaryColor2(bruceConfig.bgColor));
+
+            for (int row = 0; row < KeyboardHeight; ++row) {
+                for (int col = 0; col < KeyboardWidth; ++col) {
+                    const int keyX = col * keyWidth;
+                    const int keyY = kGridTop + row * rowHeight;
+                    const bool selected = y == row && x == col;
+                    if (selected) {
+                        tft.fillRect(keyX, keyY, keyWidth, rowHeight, getComplementaryColor2(bruceConfig.bgColor));
+                        tft.setTextColor(bruceConfig.bgColor, getComplementaryColor2(bruceConfig.bgColor));
+                    } else {
+                        tft.setTextColor(getComplementaryColor2(bruceConfig.bgColor), bruceConfig.bgColor);
+                    }
+                    const char key = keys[row][col][caps];
+                    if (key != '\0') {
+                        tft.drawString(String(key), keyX + max(0, (keyWidth - 6) / 2), keyY + max(0, (rowHeight - 8) / 2));
+                    }
+                }
+            }
+
+            for (int action = 0; action < kActionCount; ++action) {
+                const int actionX = action * actionWidth;
+                const int width = action == kActionCount - 1 ? tftWidth - actionX : actionWidth;
+                const bool selected = y == -1 && x == action;
+                if (selected) {
+                    tft.fillRect(actionX, kActionsTop, width, tftHeight - kActionsTop,
+                                 getComplementaryColor2(bruceConfig.bgColor));
+                    tft.setTextColor(bruceConfig.bgColor, getComplementaryColor2(bruceConfig.bgColor));
+                } else {
+                    tft.setTextColor(getComplementaryColor2(bruceConfig.bgColor), bruceConfig.bgColor);
+                }
+                String label = actionLabels[action];
+                if (action == 1) label = caps ? "ab" : "Aa";
+                tft.drawString(label, actionX + max(0, (width - tft.textWidth(label)) / 2), kActionsTop);
+            }
+
+            tft.endWrite();
+            redraw = false;
+        }
+
+        // Long press on D25 is always Back, even while a character is selected.
+        if (check(EscPress)) {
+            current_text = "\x1B";
+            break;
+        }
+
+        // D33 moves down through keyboard rows and finally to the action bar.
+        if (check(DownPress)) {
+            y++;
+            if (y >= KeyboardHeight) y = -1;
+            selectFirstValidKey();
+            redraw = true;
+        }
+
+        // D32 moves right within the current row.
+        if (check(NextPress)) {
+            const int width = y < 0 ? kActionCount : KeyboardWidth;
+            x = (x + 1) % width;
+            selectFirstValidKey();
+            redraw = true;
+        }
+
+        // Short press on D25 activates the highlighted key/action.
+        if (check(SelPress)) {
+            if (y >= 0) {
+                const char selected = keys[y][x][caps];
+                if (selected != '\0' && current_text.length() < max_size) current_text += selected;
+                redraw = true;
+            } else {
+                switch (x) {
+                    case 0: // OK
+                        tft.fillScreen(bruceConfig.bgColor);
+                        resetTftDisplay();
+                        return current_text;
+                    case 1: // Aa / caps
+                        caps = !caps;
+                        selectFirstValidKey();
+                        redraw = true;
+                        break;
+                    case 2: // delete
+                        if (current_text.length() > 0) current_text.remove(current_text.length() - 1);
+                        redraw = true;
+                        break;
+                    case 3: // space
+                        if (current_text.length() < max_size) current_text += ' ';
+                        redraw = true;
+                        break;
+                    case 4: // back
+                        current_text = "\x1B";
+                        break;
+                }
+                if (current_text == "\x1B") break;
+            }
+        }
+
+        delay(10);
+    }
+
+    tft.fillScreen(bruceConfig.bgColor);
+    resetTftDisplay();
+    return current_text;
+}
+#endif
+
 template <int KeyboardHeight, int KeyboardWidth>
 String generalKeyboard(
     String current_text, int max_size, String textbox_title, char keys[KeyboardHeight][KeyboardWidth][2],
     bool mask_input = false
 ) {
+#if defined(HAS_OLED_SSD1306)
+    return oledKeyboard<KeyboardHeight, KeyboardWidth>(current_text, max_size, textbox_title, keys, mask_input);
+#endif
     max_FM_size = tftWidth / (LW * FM) - 1;
     max_FP_size = tftWidth / (LW)-2;
     resetTftDisplay();

@@ -1,5 +1,7 @@
 #include "qrcode_menu.h"
+#ifdef HAS_SCREEN
 #include "../lib/TFT_eSPI_QRcode/src/qrcode.h"
+#endif
 #include "core/config.h"
 #include "core/display.h"
 #include "core/mykeyboard.h"
@@ -37,6 +39,9 @@ void qrcode_display(String qrcodeUrl) {
     delay(300); // Due to M5 sel press, it could be confusing with next line
     while (!check(EscPress) && !check(SelPress)) delay(100);
     tft.fillScreen(bruceConfig.bgColor);
+#else
+    (void)qrcodeUrl;
+    displayInfo("Use WebUI for QR", true);
 #endif
 }
 

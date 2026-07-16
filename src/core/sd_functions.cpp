@@ -659,13 +659,21 @@ String loopSD(FS &fs, bool filePicker, String allowed_ext, String rootPath) {
         }
 #endif
 
+#if defined(HAS_OLED_SSD1306)
+        if (check(NextPress) || check(PrevPress) || check(UpPress)) {
+#else
         if (check(PrevPress) || check(UpPress)) {
+#endif
             if (index == 0) index = maxFiles;
             else if (index > 0) index--;
             redraw = true;
         }
-        /* DW Btn to next item */
+        /* D32 moves down; D33 is previous/up on the BRUCER-LITE file list. */
+#if defined(HAS_OLED_SSD1306)
+        if (check(DownPress)) {
+#else
         if (check(NextPress) || check(DownPress)) {
+#endif
             if (index == maxFiles) index = 0;
             else index++;
             redraw = true;

@@ -18,6 +18,8 @@ bool is_free_gpio_pin(int pin_no) {
             47, 48                                          // GPIO47 to GPIO48
         }
     );
+#elif defined(HAS_OLED_SSD1306)
+    usable_pins.insert(usable_pins.end(), {25, 32, 33});
 #endif
 
     for (int usable_pin : usable_pins)

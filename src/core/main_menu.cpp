@@ -50,6 +50,11 @@ void MainMenu::begin(void) {
                  false,                                  // selected = false
                  [](void *menuItem, bool shouldRender) { // render lambda
                      if (!shouldRender) return false;
+#if defined(HAS_OLED_SSD1306)
+                     // The icon dashboard was designed for larger color TFTs.
+                     // Let the compact list renderer handle a 128x64 OLED.
+                     return false;
+#else
                      drawMainBorder(false);
 
                      MenuItemInterface *obj = static_cast<MenuItemInterface *>(menuItem);
@@ -60,6 +65,7 @@ void MainMenu::begin(void) {
                      TouchFooter();
 #endif
                      return true;
+#endif
                  },
                  _menuItems[i]
                 }

@@ -8,7 +8,11 @@
 #include <interface.h> //for charging ischarging to print charging indicator
 #include <memory>
 
+#if defined(HAS_OLED_SSD1306)
+#define MAX_MENU_SIZE 4
+#else
 #define MAX_MENU_SIZE (int)(tftHeight / 25)
+#endif
 
 // Send the ST7789 into or out of sleep mode
 void panelSleep(bool on) {
@@ -136,6 +140,40 @@ void displayRedStripe(String text, uint16_t fgcolor, uint16_t bgcolor) {
     // detect if not running in interactive mode -> show nothing onscreen and return immediately
     // if (server || isSleeping || isScreenOff) return; // webui is running
 
+#if defined(HAS_OLED_SSD1306)
+    (void)fgcolor;
+    (void)bgcolor;
+    constexpr int kCharsPerLine = 20;
+    constexpr int kMaxLines = 4;
+
+    tft.startWrite();
+    tft.fillScreen(bruceConfig.bgColor);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(getComplementaryColor2(bruceConfig.bgColor), bruceConfig.bgColor);
+    tft.drawString("BRUCE LITE", 1, 0);
+    tft.drawRightString("25 OK", tftWidth - 1, 0);
+    tft.drawString("STARTERPACK", 1, 8);
+    tft.drawFastHLine(0, 15, tftWidth, getComplementaryColor2(bruceConfig.bgColor));
+
+    int line = 0;
+    while (text.length() && line < kMaxLines) {
+        int take = min(kCharsPerLine, (int)text.length());
+        if (take < (int)text.length()) {
+            int split = text.substring(0, take + 1).lastIndexOf(' ');
+            if (split > 4) take = split;
+        }
+        String part = text.substring(0, take);
+        part.trim();
+        tft.drawString(part, 2, 18 + line * 10);
+        text = text.substring(take);
+        text.trim();
+        line++;
+    }
+    tft.endWrite();
+    return;
+#endif
+
     int size;
     if (fgcolor == bgcolor && fgcolor == TFT_WHITE) fgcolor = TFT_BLACK;
     if (text.length() * LW * FM < (tftWidth - 2 * FM * LW)) size = FM;
@@ -161,6 +199,21 @@ void displayRedStripe(String text, uint16_t fgcolor, uint16_t bgcolor) {
 void drawButton(
     int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color, const char *text, bool inverted = false
 ) {
+#if defined(HAS_OLED_SSD1306)
+    tft.setTextDatum(TL_DATUM);
+    if (inverted) {
+        tft.fillRect(x, y, w, h, color);
+        tft.setTextColor(TFT_BLACK, color);
+    } else {
+        tft.drawRect(x, y, w, h, color);
+        tft.setTextColor(color, TFT_BLACK);
+    }
+    String label(text ? text : "");
+    int maxChars = max(1, (int)w / 6);
+    if (label.length() > maxChars) label = label.substring(0, maxChars);
+    tft.drawString(label, x + max(1, (int)(w - tft.textWidth(label)) / 2), y + max(0, (int)(h - 8) / 2));
+    return;
+#endif
     if (inverted) {
         tft.fillRoundRect(x, y, w, h, 5, color);
     } else {
@@ -175,6 +228,62 @@ int8_t displayMessage(
     const char *message, const char *leftButton, const char *centerButton, const char *rightButton,
     uint16_t color
 ) {
+#if defined(HAS_OLED_SSD1306)
+    const char *labels[3] = {leftButton, centerButton, rightButton};
+    int8_t available[3] = {-1, -1, -1};
+    int8_t totalButtons = 0;
+    for (int8_t i = 0; i < 3; ++i)
+        if (labels[i]) available[totalButtons++] = i;
+    if (totalButtons == 0) return -1;
+
+    tft.startWrite();
+    tft.fillScreen(bruceConfig.bgColor);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(color, bruceConfig.bgColor);
+    tft.drawString("BRUCE LITE", 1, 0);
+    tft.drawRightString("33/32 25OK", tftWidth - 1, 0);
+    tft.drawFastHLine(0, 15, tftWidth, color);
+    String msg(message ? message : "");
+    for (int line = 0; line < 3 && msg.length(); ++line) {
+        int take = min(20, (int)msg.length());
+        if (take < (int)msg.length()) {
+            int split = msg.substring(0, take + 1).lastIndexOf(' ');
+            if (split > 4) take = split;
+        }
+        String part = msg.substring(0, take);
+        part.trim();
+        tft.drawString(part, 2, 18 + line * 10);
+        msg = msg.substring(take);
+        msg.trim();
+    }
+    tft.endWrite();
+
+    int8_t selected = 0;
+    bool redraw = true;
+    while (true) {
+        if (check(EscPress)) return 0;
+        if (check(NextPress) || check(DownPress)) {
+            selected = (selected + 1) % totalButtons;
+            redraw = true;
+        }
+        if (check(SelPress)) return selected;
+
+        if (redraw) {
+            const int width = tftWidth / totalButtons;
+            tft.startWrite();
+            tft.fillRect(0, 53, tftWidth, 11, bruceConfig.bgColor);
+            for (int8_t slot = 0; slot < totalButtons; ++slot) {
+                int x = slot * width;
+                int w = slot == totalButtons - 1 ? tftWidth - x : width;
+                drawButton(x, 54, w, 10, color, labels[available[slot]], slot == selected);
+            }
+            tft.endWrite();
+            redraw = false;
+        }
+        delay(10);
+    }
+#else
 #ifdef HAS_SCREEN
     uint8_t oldTextDatum = tft.getTextDatum();
 #endif
@@ -261,60 +370,69 @@ int8_t displayMessage(
 #endif
 
     return selected;
+#endif
+}
+
+static void waitForDisplayMessageKey(bool waitKeyPress) {
+    delay(200);
+    while (waitKeyPress && !check(AnyKeyPress)) vTaskDelay(10 / portTICK_PERIOD_MS);
+#if defined(HAS_OLED_SSD1306)
+    // AnyKeyPress is only the wake/wait aggregate. Consume the matching
+    // latched action too, otherwise it leaks into the menu behind the dialog.
+    check(DownPress);
+    check(NextPress);
+    check(SelPress);
+    check(EscPress);
+#endif
 }
 
 void displayError(String txt, bool waitKeyPress) {
     displayRedStripe(txt);
-#ifndef HAS_SCREEN
+#if !defined(HAS_SCREEN) && !defined(HAS_OLED_SSD1306)
     Serial.println("ERR: " + txt);
     return;
 #endif
-    delay(200);
-    while (waitKeyPress && !check(AnyKeyPress)) vTaskDelay(10 / portTICK_PERIOD_MS);
+    waitForDisplayMessageKey(waitKeyPress);
 }
 
 void displayWarning(String txt, bool waitKeyPress) {
     displayRedStripe(txt, TFT_BLACK, TFT_YELLOW);
-#ifndef HAS_SCREEN
+#if !defined(HAS_SCREEN) && !defined(HAS_OLED_SSD1306)
     Serial.println("WARN: " + txt);
     return;
 #endif
-    delay(200);
-    while (waitKeyPress && !check(AnyKeyPress)) vTaskDelay(10 / portTICK_PERIOD_MS);
+    waitForDisplayMessageKey(waitKeyPress);
 }
 
 void displayInfo(String txt, bool waitKeyPress) {
     // todo: add newlines to txt if too long
     displayRedStripe(txt, TFT_WHITE, TFT_BLUE);
-#ifndef HAS_SCREEN
+#if !defined(HAS_SCREEN) && !defined(HAS_OLED_SSD1306)
     Serial.println("INFO: " + txt);
     return;
 #endif
 
-    delay(200);
-    while (waitKeyPress && !check(AnyKeyPress)) vTaskDelay(10 / portTICK_PERIOD_MS);
+    waitForDisplayMessageKey(waitKeyPress);
 }
 
 void displaySuccess(String txt, bool waitKeyPress) {
     // todo: add newlines to txt if too long
     displayRedStripe(txt, TFT_WHITE, TFT_DARKGREEN);
-#ifndef HAS_SCREEN
+#if !defined(HAS_SCREEN) && !defined(HAS_OLED_SSD1306)
     Serial.println("SUCCESS: " + txt);
     return;
 #endif
-    delay(200);
-    while (waitKeyPress && !check(AnyKeyPress)) vTaskDelay(10 / portTICK_PERIOD_MS);
+    waitForDisplayMessageKey(waitKeyPress);
 }
 
 void displayTextLine(String txt, bool waitKeyPress) {
     // todo: add newlines to txt if too long
     displayRedStripe(txt, getComplementaryColor2(bruceConfig.priColor), bruceConfig.priColor);
-#ifndef HAS_SCREEN
+#if !defined(HAS_SCREEN) && !defined(HAS_OLED_SSD1306)
     Serial.println("MESSAGE: " + txt);
     return;
 #endif
-    delay(200);
-    while (waitKeyPress && !check(AnyKeyPress)) vTaskDelay(10 / portTICK_PERIOD_MS);
+    waitForDisplayMessageKey(waitKeyPress);
 }
 
 void setPadCursor(int16_t padx, int16_t pady) {
@@ -542,6 +660,19 @@ int loopOptions(
                 renderedByLambda = options[index].hover(options[index].hoverPointer, true);
 
             if (!renderedByLambda) {
+#if defined(HAS_OLED_SSD1306)
+                // Use the same compact four-line list for every menu level.
+                // The regular submenu renderer reserves too much vertical
+                // space for a status bar and three large labels.
+                coord = drawOptions(
+                    index,
+                    options,
+                    bruceConfig.priColor,
+                    bruceConfig.secColor,
+                    bruceConfig.bgColor,
+                    firstRender
+                );
+#else
                 if (menuType == MENU_TYPE_SUBMENU) drawSubmenu(index, options, subText);
                 else
                     coord = drawOptions(
@@ -552,6 +683,7 @@ int loopOptions(
                         bruceConfig.bgColor,
                         firstRender
                     );
+#endif
             }
             if (firstRender) menuOpenTs = millis();
             firstRender = false;
@@ -577,6 +709,17 @@ int loopOptions(
             break;
         }
 
+#if defined(HAS_OLED_SSD1306)
+        // BRUCER-LITE has no dedicated UP button.  In vertical menus D33 is
+        // therefore the QoL "previous/up" key.  Screens with a real
+        // horizontal action still consume NextPress themselves.
+        if (check(NextPress)) {
+            devModeCounter = 0;
+            int prevEnabled = findNextEnabled(index, -1);
+            if (prevEnabled >= 0) index = prevEnabled;
+            redraw = true;
+        } else
+#endif
         if (PrevPress || check(UpPress)) {
             devModeCounter = 0;
 #ifdef HAS_KEYBOARD
@@ -618,8 +761,12 @@ int loopOptions(
             }
 #endif
         }
-        /* DW Btn to next item */
+        /* D32 moves to the next/down item on BRUCER-LITE. */
+#if defined(HAS_OLED_SSD1306)
+        if (check(DownPress)) {
+#else
         if (check(NextPress) || check(DownPress)) {
+#endif
             int nextEnabled = findNextEnabled(index, +1);
             if (nextEnabled >= 0) {
                 if (!bruceConfig.devMode && nextEnabled <= index) devModeCounter++;
@@ -661,6 +808,24 @@ int loopOptions(
 ** Dependencia: prog_handler =>>    0 - Flash, 1 - LittleFS
 ***************************************************************************************/
 void progressHandler(int progress, size_t total, String message) {
+#if defined(HAS_OLED_SSD1306)
+    const int percent = total ? min(100, (int)((progress * 100ULL) / total)) : 0;
+    const int oledBarWidth = map(percent, 0, 100, 0, tftWidth - 4);
+    tft.startWrite();
+    tft.fillScreen(bruceConfig.bgColor);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
+    tft.drawString("BRUCE LITE", 1, 0);
+    tft.drawRightString(String(percent) + "%", tftWidth - 1, 0);
+    tft.drawFastHLine(0, 15, tftWidth, bruceConfig.priColor);
+    if (message.length() > 20) message = message.substring(0, 19) + "~";
+    tft.drawString(message, 2, 23);
+    tft.drawRect(1, 43, tftWidth - 2, 12, bruceConfig.priColor);
+    tft.fillRect(2, 44, oledBarWidth, 10, bruceConfig.priColor);
+    tft.endWrite();
+    return;
+#endif
     int barWidth = map(progress, 0, total, 0, tftWidth - 40);
     if (barWidth < 3) {
         tft.fillRect(6, 27, tftWidth - 12, tftHeight - 33, bruceConfig.bgColor);
@@ -679,6 +844,63 @@ Opt_Coord drawOptions(
     bool firstRender
 ) {
     Opt_Coord coord;
+#if defined(HAS_OLED_SSD1306)
+    (void)selcolor;
+    (void)firstRender;
+
+    constexpr int kVisibleRows = 4;
+    // Common 0.96-inch bicolor SSD1306 panels have a physical yellow
+    // filter over rows 0..15 and a blue filter over rows 16..63.
+    constexpr int kHeaderLineY = 15;
+    constexpr int kFirstRowY = 17;
+    constexpr int kRowHeight = 11;
+
+    int first = 0;
+    if (index >= kVisibleRows) first = index - kVisibleRows + 1;
+
+    tft.fillScreen(bgcolor);
+    tft.setTextSize(1);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(fgcolor, bgcolor);
+
+    String position = String(index + 1) + "/" + String(options.size());
+    String title = menuOptionLabel.length() ? menuOptionLabel : "BRUCE";
+    title.toUpperCase();
+    int maxTitleChars = max(4, (tftWidth - tft.textWidth(position) - 12) / LW);
+    if (title.length() > maxTitleChars) title = title.substring(0, maxTitleChars - 1) + "~";
+    tft.drawString(title, 2, 0);
+    tft.drawRightString(position, tftWidth - 2, 0);
+    tft.drawCentreString("33^  32v  25OK/<", tftWidth / 2, 8);
+    tft.drawFastHLine(0, kHeaderLineY, tftWidth, fgcolor);
+
+    for (int row = 0; row < kVisibleRows; ++row) {
+        int optionIndex = first + row;
+        if (optionIndex >= static_cast<int>(options.size())) break;
+
+        int y = kFirstRowY + row * kRowHeight;
+        bool selected = optionIndex == index;
+        String label = options[optionIndex].label;
+        if (!options[optionIndex].enabled) label = "x " + label;
+        constexpr int kMaxLabelChars = 20;
+        if (label.length() > kMaxLabelChars)
+            label = label.substring(0, kMaxLabelChars - 1) + "~";
+
+        if (selected) {
+            tft.fillRect(1, y, tftWidth - 2, kRowHeight - 1, fgcolor);
+            tft.setTextColor(bgcolor, fgcolor);
+            coord.x = 4;
+            coord.y = y + 1;
+            coord.size = kMaxLabelChars;
+            coord.fgcolor = bgcolor;
+            coord.bgcolor = fgcolor;
+        } else {
+            tft.setTextColor(fgcolor, bgcolor);
+        }
+        tft.drawString(label, 4, y + 1);
+    }
+    return coord;
+#endif
+
     int menuSize = options.size();
     if (options.size() > MAX_MENU_SIZE) { menuSize = MAX_MENU_SIZE; }
 
@@ -803,6 +1025,12 @@ void drawSubmenu(int index, std::vector<Option> &options, const char *title) {
 }
 
 void drawStatusBar() {
+#if defined(HAS_OLED_SSD1306)
+    // The compact OLED menu owns all 64 rows.  The regular TFT status bar
+    // starts at y=12 and is refreshed every 30 seconds, which overwrote the
+    // first menu rows with a clock/version string.
+    return;
+#endif
     uint8_t bat = getBattery();
     if (bat > 0) drawBatteryStatus(bat);
 
@@ -888,6 +1116,16 @@ void drawStatusBar() {
 }
 
 void drawMainBorder(bool clear) {
+#if defined(HAS_OLED_SSD1306)
+    // On 64 vertical pixels the standard 25-pixel status bar collides with
+    // the menu. Give the complete OLED area to the compact list instead.
+    if (clear) {
+        tft.drawPixel(0, 0, 0);
+        tft.fillScreen(bruceConfig.bgColor);
+    }
+    tft.setTextDatum(0);
+    return;
+#endif
     if (clear) {
         tft.drawPixel(0, 0, 0);
         tft.fillScreen(bruceConfig.bgColor);
@@ -913,6 +1151,16 @@ void printTitle(String title) {
     title.toUpperCase();
     tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
 
+#if defined(HAS_OLED_SSD1306)
+    if (title.length() > 20) title = title.substring(0, 19) + "~";
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+    tft.fillRect(0, 0, tftWidth, 16, bruceConfig.bgColor);
+    tft.drawString(title, 2, 0);
+    tft.drawFastHLine(0, 15, tftWidth, bruceConfig.priColor);
+    return;
+#endif
+
     // Scale down title font if it doesn't fit the screen width
     int titleSize = FM;
     while (titleSize > FP && (int)(title.length() * titleSize * LW) > tftWidth - 2 * BORDER_PAD_X) {
@@ -927,6 +1175,16 @@ void printTitle(String title) {
 }
 
 void printSubtitle(String subtitle, bool withLine) {
+#if defined(HAS_OLED_SSD1306)
+    if (subtitle.length() > 20) subtitle = subtitle.substring(0, 19) + "~";
+    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
+    tft.setTextSize(1);
+    tft.setCursor(2, 18);
+    tft.println(subtitle);
+    if (withLine)
+        tft.drawFastHLine(2, 27, min(tftWidth - 4, (int)subtitle.length() * 6), bruceConfig.priColor);
+    return;
+#endif
     int16_t cursorX = (tftWidth - (subtitle.length() * FP * LW)) / 2;
     tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
     tft.setTextSize(FP);
@@ -944,11 +1202,17 @@ void printSubtitle(String subtitle, bool withLine) {
 }
 
 void printFootnote(String text) {
+#if defined(HAS_OLED_SSD1306)
+    if (text.length() > 20) text = text.substring(0, 19) + "~";
+#endif
     tft.setTextSize(FP);
     tft.drawRightString(text, tftWidth - BORDER_PAD_X, tftHeight - BORDER_PAD_X - FP * LH, SMOOTH_FONT);
 }
 
 void printCenterFootnote(String text) {
+#if defined(HAS_OLED_SSD1306)
+    if (text.length() > 20) text = text.substring(0, 19) + "~";
+#endif
     tft.fillRect(10, tftHeight - BORDER_PAD_X - FP * LH, tftWidth - 20, FP * LH, bruceConfig.bgColor);
     tft.setTextSize(FP);
     tft.drawCentreString(text, tftWidth / 2, tftHeight - BORDER_PAD_X - FP * LH, SMOOTH_FONT);
@@ -996,6 +1260,42 @@ void drawWireguardStatus(int x, int y) {
 #define MAX_ITEMS (int)(tftHeight - 20) / (LH * FM)
 Opt_Coord listFiles(int index, std::vector<FileList> fileList) {
     Opt_Coord coord;
+#if defined(HAS_OLED_SSD1306)
+    constexpr int kRows = 5;
+    constexpr int kRowTop = 17;
+    constexpr int kRowHeight = 9;
+    int oledStart = index >= kRows ? index - kRows + 1 : 0;
+
+    tft.fillScreen(bruceConfig.bgColor);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
+    tft.drawString("FILES", 2, 0);
+    tft.drawRightString(String(index + 1) + "/" + String(fileList.size()), tftWidth - 2, 0);
+    tft.drawString("33^ 32v 25OK/<", 2, 8);
+    tft.drawFastHLine(0, 15, tftWidth, bruceConfig.priColor);
+
+    for (int row = 0; row < kRows; ++row) {
+        int item = oledStart + row;
+        if (item >= (int)fileList.size()) break;
+        String label = (fileList[item].folder ? "/" : " ") + fileList[item].filename;
+        if (label.length() > 20) label = label.substring(0, 19) + "~";
+        int y = kRowTop + row * kRowHeight;
+        if (item == index) {
+            tft.fillRect(1, y, tftWidth - 2, kRowHeight, bruceConfig.priColor);
+            tft.setTextColor(bruceConfig.bgColor, bruceConfig.priColor);
+            coord.x = 3;
+            coord.y = y;
+            coord.size = 20;
+            coord.fgcolor = bruceConfig.bgColor;
+            coord.bgcolor = bruceConfig.priColor;
+        } else {
+            tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
+        }
+        tft.drawString(label, 3, y);
+    }
+    return coord;
+#endif
     tft.drawPixel(0, 0, bruceConfig.bgColor);
     if (index == 0) {
         tft.fillScreen(bruceConfig.bgColor);

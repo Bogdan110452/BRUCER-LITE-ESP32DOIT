@@ -1,6 +1,9 @@
 #ifndef __DISPLAY_LOGER
 #define __DISPLAY_LOGER
-#ifdef HAS_SCREEN
+#if defined(HAS_OLED_SSD1306)
+#include <OledDisplay.h>
+#define BRUCE_TFT_DRIVER OledDisplayClass
+#elif defined(HAS_SCREEN)
 #include <display/tft.h>
 #define BRUCE_TFT_DRIVER tft_display
 #else

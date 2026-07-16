@@ -61,6 +61,14 @@ void __attribute__((weak)) taskInputHandler(void *parameter) {
     auto timer = millis();
     while (true) {
         checkPowerSaveTime();
+#if defined(HAS_OLED_SSD1306)
+        // ESP32-Classic uses edge-triggered, latched button events.  Its
+        // InputHandler owns those flags and check() clears each one only
+        // after the UI has consumed it.  Clearing them here made a click
+        // visible for a single 10 ms cycle and menus could miss it while
+        // the SSD1306 was transferring a frame over I2C.
+        InputHandler();
+#else
         // Sometimes this task run 2 or more times before looptask,
         // and navigation gets stuck, the idea here is run the input detection
         // if AnyKeyPress is false, or rerun if it was not renewed within 75ms (arbitrary)
@@ -83,6 +91,7 @@ void __attribute__((weak)) taskInputHandler(void *parameter) {
 #endif
             timer = millis();
         }
+#endif
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
@@ -212,7 +221,19 @@ void setup_gpio() {
  *********************************************************************/
 void begin_tft() {
     tft.setRotation(bruceConfigPins.rotation); // sometimes it misses the first command
+#if defined(HAS_OLED_SSD1306)
+    // BRUCE color themes were designed for RGB TFTs. On a monochrome OLED,
+    // every non-black background becomes a fully lit panel. Keep this target
+    // in a predictable low-light theme regardless of settings left by an
+    // older firmware build.
+    bruceConfig.priColor = TFT_WHITE;
+    bruceConfig.secColor = TFT_WHITE;
+    bruceConfig.bgColor = TFT_BLACK;
+    bruceConfig.colorInverted = 0;
+    tft.invertDisplay(false);
+#else
     tft.invertDisplay(bruceConfig.colorInverted);
+#endif
     tft.setRotation(bruceConfigPins.rotation);
     tftWidth = tft.width();
 #ifdef HAS_TOUCH
@@ -229,6 +250,21 @@ void begin_tft() {
  **  Draw boot screen
  *********************************************************************/
 void boot_screen() {
+#if defined(HAS_OLED_SSD1306)
+    tft.startWrite();
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString("BRUCE LITE", 2, 0);
+    tft.drawRightString(BRUCE_VERSION, tftWidth - 2, 0);
+    tft.drawFastHLine(0, 15, tftWidth, TFT_WHITE);
+    tft.drawCentreString("STARTERPACK", tftWidth / 2, 22);
+    tft.drawCentreString("ESP32 + OLED 128x64", tftWidth / 2, 34);
+    tft.drawCentreString("D33  D32  D25", tftWidth / 2, 48);
+    tft.endWrite();
+    return;
+#endif
     tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
     tft.setTextSize(FM);
     tft.drawPixel(0, 0, bruceConfig.bgColor);
@@ -359,14 +395,11 @@ void init_clock() {
     struct timeval tv = {.tv_sec = epoch};
     settimeofday(&tv, nullptr);
 #else
-    struct tm timeinfo = {};
-    timeinfo.tm_year = CURRENT_YEAR - 1900;
-    timeinfo.tm_mon = 0x05;
-    timeinfo.tm_mday = 0x14;
-    time_t epoch = mktime(&timeinfo);
-    rtc.setTime(epoch);
-    clock_set = true;
-    struct timeval tv = {.tv_sec = epoch};
+    // The classic DOIT board has no battery-backed RTC. Do not present the
+    // old placeholder date as a valid clock; NTP or manual setup will set it.
+    rtc.setTime(0);
+    clock_set = false;
+    struct timeval tv = {.tv_sec = 0};
     settimeofday(&tv, nullptr);
 #endif
 }
@@ -482,7 +515,16 @@ void setup() {
         &xHandle                       // Task handle (not used)
     );
     // #endif
-#if defined(HAS_SCREEN)
+#if defined(HAS_OLED_SSD1306)
+    if (!bruceConfig.instantBoot) {
+        boot_screen();
+        delay(1200);
+    }
+    if (bruceConfig.wifiAtStartup) {
+        log_i("Loading Wifi at Startup");
+        xTaskCreate(wifiConnectTask, "wifiConnectTask", 4096, NULL, 2, NULL);
+    }
+#elif defined(HAS_SCREEN)
     bruceConfig.openThemeFile(bruceConfig.themeFS(), bruceConfig.themePath, false);
     if (!bruceConfig.instantBoot) {
         boot_screen_anim();
@@ -513,7 +555,7 @@ void setup() {
  **  Function: loop
  **  Main loop
  **********************************************************************/
-#if defined(HAS_SCREEN)
+#if defined(HAS_SCREEN) || defined(HAS_OLED_SSD1306)
 void loop() {
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
     if (interpreter_state > 0) {

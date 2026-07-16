@@ -20,6 +20,7 @@ void ClockMenu::optionsMenu() {
 
 void ClockMenu::showSubMenu() {
     options = {
+        {"Set Clock",     [=]() { setClock(); }         },
         {"Timer",         [=]() { Timer(); }            },
         {"Back to Clock", [=]() {}                      },
         {"Exit",          [=]() { returnToMenu = true; }}

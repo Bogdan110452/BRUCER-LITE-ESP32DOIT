@@ -87,8 +87,13 @@ void ScrollableTextArea::show(bool force) {
 uint32_t ScrollableTextArea::getMaxVisibleTextLength() { return _maxVisibleLines * _maxCharactersPerLine; }
 
 void ScrollableTextArea::update(bool force) {
+#if defined(HAS_OLED_SSD1306)
+    if (check(NextPress) || check(PrevPress) || check(UpPress)) scrollUp();
+    else if (check(DownPress)) scrollDown();
+#else
     if (check(PrevPress) || check(UpPress)) scrollUp();
     else if (check(NextPress) || check(DownPress)) scrollDown();
+#endif
 
     draw(force);
 }

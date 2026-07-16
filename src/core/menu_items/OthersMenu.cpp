@@ -14,7 +14,9 @@
 
 void OthersMenu::optionsMenu() {
     options = {
+#if !defined(HAS_OLED_SSD1306)
         {"QRCodes",      qrcode_menu                  },
+#endif
         {"Megalodon",    shark_setup                  },
 
 #if defined(MIC_SPM1423) || defined(MIC_INMP441)
